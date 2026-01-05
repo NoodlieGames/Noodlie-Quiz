@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuizShow Pro | Multiplayer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Firebase Compat Libraries -->
+    <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0f172a; color: #f8fafc; }
+        .buzzer-active { animation: pulse-red 2s infinite; }
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+        }
+        .glass { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.05); }
+    </style>
+</head>
+<body class="min-h-screen selection:bg-purple-500/30">
+
+    <div class="fixed inset-0 pointer-events-none overflow-hidden -z-10">
+        <div class="absolute top-0 left-1/4 w-96 h-96 bg-purple-600/10 rounded-full blur-[100px]"></div>
+        <div class="absolute bottom-0 right-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-[100px]"></div>
+    </div>
+
+    <div id="app" class="flex flex-col min-h-screen">
+        <header class="p-4 flex justify-between items-center border-b border-white/5 glass sticky top-0 z-50">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center shadow-lg">
+                    <i data-lucide="zap" class="w-5 h-5 text-white fill-white"></i>
+                </div>
+                <h1 class="font-bold text-lg tracking-tight">QuizShow<span class="text-purple-400">Pro</span></h1>
+            </div>
+            <div class="flex items-center gap-3">
+                <div id="statusBadge" class="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded bg-slate-800 text-slate-400">
+                    Checking Config...
+                </div>
+            </div>
+        </header>
+
+        <main id="mainContent" class="flex-grow flex flex-col p-4 md:p-8 max-w-6xl mx-auto w-full">
+            <div id="loading" class="flex-grow flex items-center justify-center">
+                <div class="flex flex-col items-center gap-4">
+                    <i data-lucide="loader-2" class="w-12 h-12 animate-spin text-purple-500"></i>
+                    <p class="text-slate-400">Initializing Game Engine...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Setup Guide Template -->
+    <template id="tpl-setup-guide">
+        <div class="flex flex-col items-center justify-center py-12 text-center max-w-lg mx-auto">
+            <div class="w-20 h-20 bg-amber-500/20 text-amber-500 rounded-full flex items-center justify-center mb-6">
+                <i data-lucide="alert-triangle" class="w-10 h-10"></i>
+            </div>
+            <h2 class="text-3xl font-bold mb-4">Configuration Needed</h2>
+            <p class="text-slate-400 mb-8 leading-relaxed">Multiplayer is currently disabled because your Firebase keys are missing. Open your code and fill in the <strong>LOCAL_CONFIG</strong> section.</p>
+            <div class="w-full bg-black/40 border border-white/10 rounded-2xl p-6 text-left mb-8">
+                <p class="text-xs font-bold text-slate-500 uppercase mb-3">Edit this part in your file:</p>
+                <code class="text-purple-400 text-sm break-all font-mono">const LOCAL_CONFIG = {<br>&nbsp;&nbsp;apiKey: "YOUR_KEY_HERE",<br>&nbsp;&nbsp;...<br>};</code>
+            </div>
+            <button onclick="window.location.reload()" class="bg-white text-black px-8 py-3 rounded-xl font-bold hover:bg-slate-200 transition-all">Reload After Editing</button>
+        </div>
+    </template>
+
+    <!-- App Templates -->
+    <template id="tpl-landing">
+        <div class="flex flex-col items-center justify-center flex-grow py-8 opacity-0 transition-opacity duration-500">
+            <div class="w-full max-w-md mb-8 glass p-6 rounded-3xl shadow-2xl">
+                <h2 class="text-sm uppercase tracking-wider text-slate-500 mb-4 font-bold">Player Setup</h2>
+                <div class="flex flex-col gap-5">
+                    <div class="flex gap-4 items-center">
+                        <div id="avatarDisplay" class="w-20 h-20 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center text-4xl shadow-inner border border-white/20">🦊</div>
+                        <div class="flex-grow">
+                            <label class="text-xs text-slate-500 ml-1 mb-1 block font-bold">Your Nickname</label>
+                            <input id="nameInput" maxlength="15" class="w-full bg-slate-900 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all font-semibold">
+                        </div>
+                    </div>
+                    <div id="avatarGrid" class="grid grid-cols-6 gap-2 p-2 bg-black/20 rounded-2xl"></div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl">
+                <div onclick="switchAction('join')" id="btn-join" class="cursor-pointer p-8 rounded-3xl border glass transition-all hover:bg-white/5 group border-white/5">
+                    <div class="w-12 h-12 rounded-2xl bg-purple-500/20 flex items-center justify-center mb-4 text-purple-400 group-hover:scale-110 transition-transform">
+                        <i data-lucide="play-circle"></i>
+                    </div>
+                    <h3 class="font-bold text-xl mb-1">Join a Game</h3>
+                    <div id="joinInputArea" class="hidden space-y-3 pt-2">
+                        <input id="roomCode" placeholder="4-LETTER CODE" class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-center font-mono text-2xl uppercase text-purple-400">
+                        <button onclick="joinRoom()" class="w-full bg-purple-600 py-3 rounded-xl font-bold hover:bg-purple-500">Join Lobby</button>
+                    </div>
+                </div>
+
+                <div onclick="switchAction('host')" id="btn-host" class="cursor-pointer p-8 rounded-3xl border glass transition-all hover:bg-white/5 group border-white/5">
+                    <div class="w-12 h-12 rounded-2xl bg-blue-500/20 flex items-center justify-center mb-4 text-blue-400 group-hover:scale-110 transition-transform">
+                        <i data-lucide="crown"></i>
+                    </div>
+                    <h3 class="font-bold text-xl mb-1">Host a Room</h3>
+                    <div id="hostBtnArea" class="hidden pt-2">
+                        <button onclick="createRoom()" class="w-full bg-blue-600 py-3 rounded-xl font-bold hover:bg-blue-500">Create Room</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <script>
+        /**
+         * PASTE YOUR FIREBASE VALUES INSIDE THE QUOTES BELOW
+         */
+        const LOCAL_CONFIG = {
+            apiKey: "AIzaSyCM00-6-tVlZv8qQiDLW_xc2rQ84KpSo90",
+            authDomain: "noodlie-quiz.firebaseapp.com",
+            projectId: "noodlie-quiz",
+            storageBucket: "noodlie-quiz.firebasestorage.app",
+            messagingSenderId: "68489238846",
+            appId: "1:68489238846:web:6e5cdaf62e876dea1bb46f"
+        };
+
+        const AVATARS = ['🦊', '🐱', '🤖', '👽', '🦁', '🐸', '🐙', '🐯', '🐼', '🦄', '🐷', '🐵'];
+        const DEFAULT_NAMES = ['Speedy', 'Lucky', 'Brainy', 'Sparky', 'Ace', 'Champ'];
+
+        let state = {
+            user: null,
+            name: DEFAULT_NAMES[Math.floor(Math.random() * DEFAULT_NAMES.length)],
+            avatar: AVATARS[0],
+            isOnline: false,
+            room: null,
+            role: null,
+            roomUnsub: null,
+            appId: typeof __app_id !== 'undefined' ? __app_id : 'quizshow-local-v1'
+        };
+
+        const init = async () => {
+            const statusEl = document.getElementById('statusBadge');
+            const main = document.getElementById('mainContent');
+            let config = null;
+
+            try {
+                if (typeof __firebase_config !== 'undefined') {
+                    config = JSON.parse(__firebase_config);
+                } else if (LOCAL_CONFIG.apiKey && LOCAL_CONFIG.apiKey !== "PASTE_HERE") {
+                    config = LOCAL_CONFIG;
+                }
+            } catch(e) {}
+
+            if (config && config.apiKey) {
+                firebase.initializeApp(config);
+                state.isOnline = true;
+                statusEl.innerText = "● Server Connected";
+                statusEl.className = "text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded bg-emerald-500/20 text-emerald-400";
+
+                firebase.auth().onAuthStateChanged(user => {
+                    if (user) {
+                        state.user = user;
+                        renderLanding();
+                    } else {
+                        firebase.auth().signInAnonymously();
+                    }
+                });
+            } else {
+                main.innerHTML = '';
+                const tpl = document.getElementById('tpl-setup-guide').content.cloneNode(true);
+                main.appendChild(tpl);
+                statusEl.innerText = "● Configuration Missing";
+                statusEl.className = "text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded bg-rose-500/20 text-rose-400";
+            }
+            lucide.createIcons();
+        };
+
+        function renderLanding() {
+            const main = document.getElementById('mainContent');
+            main.innerHTML = '';
+            const tpl = document.getElementById('tpl-landing').content.cloneNode(true);
+            main.appendChild(tpl);
+
+            const grid = document.getElementById('avatarGrid');
+            AVATARS.forEach(a => {
+                const b = document.createElement('button');
+                b.className = `w-10 h-10 rounded-lg flex items-center justify-center text-xl transition-all ${state.avatar === a ? 'bg-purple-500 shadow-lg' : 'hover:bg-white/10'}`;
+                b.innerText = a;
+                b.onclick = () => { state.avatar = a; renderLanding(); };
+                grid.appendChild(b);
+            });
+
+            const nameIn = document.getElementById('nameInput');
+            nameIn.value = state.name;
+            nameIn.oninput = (e) => state.name = e.target.value;
+            document.getElementById('avatarDisplay').innerText = state.avatar;
+
+            setTimeout(() => main.firstElementChild.classList.replace('opacity-0', 'opacity-100'), 50);
+            lucide.createIcons();
+        }
+
+        function switchAction(type) {
+            document.getElementById('joinInputArea').classList.toggle('hidden', type !== 'join');
+            document.getElementById('hostBtnArea').classList.toggle('hidden', type !== 'host');
+            document.getElementById('btn-join').classList.toggle('ring-2', type === 'join');
+            document.getElementById('btn-join').classList.toggle('ring-purple-500', type === 'join');
+            document.getElementById('btn-host').classList.toggle('ring-2', type === 'host');
+            document.getElementById('btn-host').classList.toggle('ring-blue-500', type === 'host');
+        }
+
+        async function createRoom() {
+            const code = Math.random().toString(36).substring(2, 6).toUpperCase();
+            state.role = 'host';
+            const db = firebase.firestore();
+            await db.doc(`artifacts/${state.appId}/public/data/rooms/${code}`).set({
+                code, hostId: state.user.uid, phase: 'lobby', players: {}, currentQuestion: 'Ready?', buzzerWinner: null
+            });
+            listen(code);
+        }
+
+        async function joinRoom() {
+            const code = document.getElementById('roomCode').value.toUpperCase();
+            if (code.length < 4) return;
+            state.role = 'player';
+            const db = firebase.firestore();
+            const ref = db.doc(`artifacts/${state.appId}/public/data/rooms/${code}`);
+            const snap = await ref.get();
+            if (!snap.exists) return alert("Room not found!");
+            await ref.update({ [`players.${state.user.uid}`]: { uid: state.user.uid, name: state.name, avatar: state.avatar, score: 0 } });
+            listen(code);
+        }
+
+        function listen(code) {
+            state.roomUnsub = firebase.firestore().doc(`artifacts/${state.appId}/public/data/rooms/${code}`)
+                .onSnapshot(snap => { if (snap.exists) { state.room = snap.data(); renderGame(); } });
+        }
+
+        function renderGame() {
+            const main = document.getElementById('mainContent');
+            const room = state.room;
+            if (room.phase === 'lobby') {
+                const players = Object.values(room.players || {});
+                main.innerHTML = `
+                    <div class="flex flex-col items-center max-w-4xl mx-auto w-full">
+                        <div class="glass p-10 rounded-3xl w-full text-center mb-8">
+                            <h2 class="text-slate-500 uppercase tracking-widest text-xs font-bold mb-4">Lobby Code</h2>
+                            <div class="text-6xl font-black text-white font-mono">${room.code}</div>
+                        </div>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 w-full mb-10">
+                            ${players.map(p => `<div class="glass p-4 rounded-2xl flex flex-col items-center"><span>${p.avatar}</span><span class="font-bold text-sm">${p.name}</span></div>`).join('')}
+                        </div>
+                        ${state.role === 'host' ? `<button onclick="updatePhase('reading')" class="bg-indigo-600 px-12 py-4 rounded-2xl font-bold text-xl hover:bg-indigo-500">Start Game</button>` : `<p class="animate-pulse">Waiting for host...</p>`}
+                    </div>`;
+            } else {
+                state.role === 'host' ? renderHostView() : renderPlayerView();
+            }
+            lucide.createIcons();
+        }
+
+        function renderHostView() {
+            const room = state.room;
+            const main = document.getElementById('mainContent');
+            main.innerHTML = `
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 w-full">
+                    <div class="lg:col-span-2 space-y-6">
+                        <div class="glass p-10 rounded-3xl text-center">
+                            <p class="text-3xl font-bold mb-10">${room.currentQuestion}</p>
+                            ${room.phase === 'reading' ? `<button onclick="updatePhase('open')" class="bg-blue-600 px-8 py-3 rounded-xl font-bold">Open Buzzers</button>` : ''}
+                            ${room.phase === 'open' ? `<div class="text-emerald-400 font-black animate-pulse uppercase">Waiting for player...</div>` : ''}
+                            ${room.phase === 'judging' ? `
+                                <div class="mt-4 p-6 bg-purple-600/10 border border-purple-500 rounded-2xl">
+                                    <p class="font-bold mb-6">${room.buzzerWinner.name} buzzed!</p>
+                                    <div class="flex gap-4 justify-center">
+                                        <button onclick="handleScore(10)" class="bg-emerald-600 px-6 py-2 rounded-xl font-bold">Right</button>
+                                        <button onclick="handleScore(-5)" class="bg-rose-600 px-6 py-2 rounded-xl font-bold">Wrong</button>
+                                    </div>
+                                </div>` : ''}
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button onclick="setQ('What is the largest ocean?')" class="glass p-4 rounded-xl text-sm">Question 1</button>
+                            <button onclick="setQ('What is 15 + 27?')" class="glass p-4 rounded-xl text-sm">Question 2</button>
+                        </div>
+                    </div>
+                    <div class="glass p-6 rounded-3xl">
+                        <h3 class="font-bold mb-6">Scores</h3>
+                        ${Object.values(room.players).map(p => `<div class="flex justify-between p-3 bg-black/30 rounded-xl mb-2"><span>${p.avatar} ${p.name}</span><span class="font-bold text-purple-400">${p.score}</span></div>`).join('')}
+                    </div>
+                </div>`;
+        }
+
+        function renderPlayerView() {
+            const room = state.room;
+            const me = room.players[state.user.uid] || {};
+            const canBuzz = room.phase === 'open' && !room.buzzerWinner;
+            document.getElementById('mainContent').innerHTML = `
+                <div class="max-w-md mx-auto flex flex-col items-center gap-10 w-full py-6 text-center">
+                    <div class="w-full glass p-5 rounded-2xl flex justify-between items-center">
+                        <div class="flex items-center gap-3"><span>${me.avatar}</span><span>${me.name}</span></div>
+                        <div class="font-black text-purple-400">${me.score}</div>
+                    </div>
+                    <p class="text-2xl font-bold">${room.currentQuestion}</p>
+                    <button onmousedown="buzz()" class="w-64 h-64 rounded-full border-[12px] transition-all ${canBuzz ? 'bg-red-600 border-red-800 buzzer-active active:scale-90' : 'bg-slate-800 border-slate-700 opacity-40'}">
+                        <span class="text-4xl font-black text-white">BUZZ</span>
+                    </button>
+                    ${room.buzzerWinner ? `<div class="animate-bounce">${room.buzzerWinner.name} is answering!</div>` : ''}
+                </div>`;
+        }
+
+        async function updatePhase(p) { await firebase.firestore().doc(`artifacts/${state.appId}/public/data/rooms/${state.room.code}`).update({ phase: p }); }
+        async function setQ(q) { await firebase.firestore().doc(`artifacts/${state.appId}/public/data/rooms/${state.room.code}`).update({ currentQuestion: q, phase: 'reading', buzzerWinner: null }); }
+        async function handleScore(pts) {
+            const uid = state.room.buzzerWinner.uid;
+            const newScore = (state.room.players[uid].score || 0) + pts;
+            await firebase.firestore().doc(`artifacts/${state.appId}/public/data/rooms/${state.room.code}`).update({ [`players.${uid}.score`]: newScore, phase: 'reading', buzzerWinner: null });
+        }
+        async function buzz() {
+            if (state.room.phase !== 'open' || state.room.buzzerWinner) return;
+            const ref = firebase.firestore().doc(`artifacts/${state.appId}/public/data/rooms/${state.room.code}`);
+            await firebase.firestore().runTransaction(async (t) => {
+                const s = await t.get(ref);
+                if (s.data().phase === 'open' && !s.data().buzzerWinner) t.update(ref, { phase: 'judging', buzzerWinner: { uid: state.user.uid, name: state.name } });
+            });
+        }
+
+        init();
+    </script>
+</body>
+</html>
